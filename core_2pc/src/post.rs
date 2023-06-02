@@ -2,5 +2,5 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct Post {
-    body: String,
+    pub body: String,
 }
