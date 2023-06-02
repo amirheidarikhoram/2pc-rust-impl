@@ -1,6 +1,9 @@
 use actix_web::{App, HttpServer};
 
 mod api_handlers;
+mod coordinator;
+mod peer;
+mod transaction;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
