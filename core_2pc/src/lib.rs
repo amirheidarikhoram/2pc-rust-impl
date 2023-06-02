@@ -1,7 +1,9 @@
+mod command;
 mod message;
-mod transaction;
 mod post;
+mod transaction;
 
+pub use command::*;
 pub use message::*;
-pub use transaction::*;
 pub use post::*;
+pub use transaction::*;
