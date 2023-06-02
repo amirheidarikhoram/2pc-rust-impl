@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core_2pc::{Transaction, TransactionState};
 
 #[derive(Debug)]

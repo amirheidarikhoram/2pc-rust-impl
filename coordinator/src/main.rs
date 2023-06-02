@@ -24,13 +24,16 @@ async fn main() -> std::io::Result<()> {
         cfg.create_pool(Some(Runtime::Tokio1), NoTls).unwrap(),
     ));
 
+    let coordinator = Arc::new(Mutex::new(coordinator::Coordinator::new()));
+
     HttpServer::new(move || {
         App::new()
             .app_data(Data::new(AppState {
-                coordinator: Arc::new(Mutex::new(coordinator::Coordinator::new())),
+                coordinator: coordinator.clone(),
                 pool: Arc::clone(&pool),
             }))
             .service(api_handlers::get_root)
+            .service(api_handlers::get_posts)
     })
     .bind(("127.0.0.1", 5000))?
     .run()
