@@ -2,16 +2,19 @@
 
 use std::{
     collections::HashMap,
-    io::Read,
+    io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::{mpsc, Arc, Mutex},
     thread::{spawn, JoinHandle},
     time::Duration,
 };
 
-use core_2pc::Message;
+use core_2pc::{Message, Transaction, TransactionState};
 
-use crate::{peer::Peer, transaction::MultiPeerTransaction};
+use crate::{
+    peer::Peer,
+    transaction::{MultiPeerTransaction, TransactionPeer},
+};
 
 pub struct Coordinator {
     listener: TcpListener,
@@ -52,6 +55,81 @@ impl Coordinator {
 
     pub fn handle_message(message: Message) {
         println!("Received: {:?}", message);
+    }
+
+    pub fn execute_transaction(&mut self, transaction: Transaction) -> Result<usize, String> {
+        let tx_peers = self
+            .peers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|peer| TransactionPeer {
+                id: peer.id.clone(),
+                transaction: transaction.clone(),
+            })
+            .collect();
+
+        let mp_transaction = MultiPeerTransaction::new(tx_peers, transaction);
+        let mpt_id = mp_transaction.id.clone();
+
+        self.broadcast_mpt(
+            &mp_transaction,
+            Message::Begin((mp_transaction.tx.clone().command, mpt_id.clone())),
+        );
+
+        self.mp_transactions
+            .lock()
+            .unwrap()
+            .insert(mpt_id.clone(), mp_transaction);
+
+        let mut tx_commit_check = 0;
+
+        loop {
+            let mp_transactions = self.mp_transactions.lock().unwrap();
+
+            // check if transaction is committed by every one
+            let mp_transaction = mp_transactions.get(&mpt_id).unwrap();
+            for tx in mp_transaction.tx_peers.iter() {
+                match tx.transaction.state {
+                    TransactionState::Commit => {
+                        tx_commit_check += 1;
+                    }
+                    TransactionState::Reject => {
+                        // TODO: broadcast abort to all peers
+
+                        return Err(format!("One of peers rejected the transaction"));
+                    }
+                    _ => {}
+                }
+            }
+
+            if tx_commit_check == mp_transaction.tx_peers.len() {
+                return Ok(tx_commit_check);
+            }
+
+            tx_commit_check = 0;
+        }
+    }
+
+    fn broadcast_mpt(&mut self, mpt: &MultiPeerTransaction, message: Message) {
+        let mut mtp_peer_ids = mpt.tx_peers.iter().map(|peer| {
+            let id = peer.id.clone();
+            id
+        });
+
+        let mut counter = self.peers.lock().unwrap().len();
+
+        let mut peers = self.peers.lock().unwrap();
+
+        while counter > 0 {
+            if let Some(peer_id) = mtp_peer_ids.next() {
+                let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
+                peer.stream
+                    .write(message.to_binary().unwrap().as_slice())
+                    .unwrap();
+            }
+            counter -= 1;
+        }
     }
 }
 
