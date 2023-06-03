@@ -72,10 +72,7 @@ impl Coordinator {
         let mp_transaction = MultiPeerTransaction::new(tx_peers, transaction);
         let mpt_id = mp_transaction.id.clone();
 
-        self.broadcast_mpt(
-            &mp_transaction,
-            Message::Begin((mp_transaction.tx.clone().command, mpt_id.clone())),
-        );
+        self.broadcast_mpt_start(&mp_transaction);
 
         self.mp_transactions
             .lock()
@@ -112,20 +109,44 @@ impl Coordinator {
     }
 
     fn broadcast_mpt(&mut self, mpt: &MultiPeerTransaction, message: Message) {
-        let mut mtp_peer_ids = mpt.tx_peers.iter().map(|peer| {
+        let mut mpt_peer_ids = mpt.tx_peers.iter().map(|peer| {
             let id = peer.id.clone();
             id
         });
 
         let mut counter = self.peers.lock().unwrap().len();
-
         let mut peers = self.peers.lock().unwrap();
 
         while counter > 0 {
-            if let Some(peer_id) = mtp_peer_ids.next() {
+            if let Some(peer_id) = mpt_peer_ids.next() {
                 let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
                 peer.stream
                     .write(message.to_binary().unwrap().as_slice())
+                    .unwrap();
+            }
+            counter -= 1;
+        }
+    }
+
+    fn broadcast_mpt_start(&mut self, mpt: &MultiPeerTransaction) {
+        let mut mpt_peer_ids = mpt.tx_peers.iter().map(|peer| {
+            let id = peer.id.clone();
+            id
+        });
+
+        let mut counter = self.peers.lock().unwrap().len();
+        let mut peers = self.peers.lock().unwrap();
+
+        while counter > 0 {
+            if let Some(peer_id) = mpt_peer_ids.next() {
+                let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
+                peer.stream
+                    .write(
+                        Message::Begin((mpt.tx.command.clone(), mpt.id.clone(), peer_id))
+                            .to_binary()
+                            .unwrap()
+                            .as_slice(),
+                    )
                     .unwrap();
             }
             counter -= 1;
