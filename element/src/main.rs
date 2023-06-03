@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
 use tokio::sync::Mutex;
@@ -8,10 +8,16 @@ mod element;
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<_> = env::args().collect();
+
+    if args.len() != 2 {
+        eprintln!("error: invalid number of arguments");
+        return;
+    }
+
     let mut cfg = Config::new();
     cfg.user = Some("amir".to_string());
-    // TODO: db_name should be unique for every element
-    cfg.dbname = Some("2pc_e1".to_string());
+    cfg.dbname = Some(args[1].clone());
     cfg.host = Some("localhost".to_string());
     cfg.manager = Some(ManagerConfig {
         recycling_method: RecyclingMethod::Fast,
