@@ -1,11 +1,19 @@
 #![allow(dead_code)]
 
+use std::cell::RefCell;
+
 use core_2pc::{Transaction, TransactionState};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransactionPeer {
     pub id: String,
-    pub transaction: Transaction,
+    pub transaction: RefCell<Transaction>,
+}
+
+impl TransactionPeer {
+    pub fn update_state(&self, state: TransactionState) {
+        self.transaction.borrow_mut().state = state;
+    }
 }
 
 #[derive(Debug)]
