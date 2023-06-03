@@ -24,6 +24,7 @@ pub struct Coordinator {
     jh: JoinHandle<()>,
     peers: Arc<Mutex<Vec<Peer>>>,
     mp_transaction: ArcOpMPT,
+    committing: bool,
 }
 
 impl Coordinator {
@@ -67,6 +68,7 @@ impl Coordinator {
             jh,
             peers,
             mp_transaction: mp_transactions,
+            committing: false,
         }
     }
 
@@ -112,7 +114,7 @@ impl Coordinator {
     }
 
     pub fn execute_transaction(&mut self, transaction: Transaction) -> Result<usize, String> {
-        let tx_peers = self
+        let tx_peers: Vec<TransactionPeer> = self
             .peers
             .lock()
             .unwrap()
@@ -123,13 +125,27 @@ impl Coordinator {
             })
             .collect();
 
-        let mp_transaction = MultiPeerTransaction::new(tx_peers, transaction);
+        {
+            let mut mp_transaction = self.mp_transaction.lock().unwrap();
+            mp_transaction.tx_peers = tx_peers.clone();
+            mp_transaction.tx = transaction.clone();
+        }
 
-        self.broadcast_mpt_start(&mp_transaction);
-
-        self.mp_transaction = Arc::new(Mutex::new(mp_transaction));
+        {
+            let peer_ids;
+            {
+                let mp_transaction = self.mp_transaction.lock().unwrap();
+                peer_ids = mp_transaction
+                    .tx_peers
+                    .iter()
+                    .map(|p| p.id.clone())
+                    .collect::<Vec<String>>();
+            }
+            self.broadcast_mpt_start(peer_ids, transaction.command.clone());
+        }
 
         let mut tx_commit_check = 0;
+        let mut tx_accept_check = 0;
 
         loop {
             let tx_peers;
@@ -156,11 +172,24 @@ impl Coordinator {
 
                         return Err(format!("One of peers rejected the transaction"));
                     }
+                    TransactionState::Accept => {
+                        tx_accept_check += 1;
+                    }
                     _ => {}
                 }
             }
 
+            if tx_accept_check == tx_peers.len() {
+                if !self.committing {
+                    self.broadcast_mpt(peer_ids, Message::Commit(format!("NONE")));
+                }
+
+                self.committing = true;
+                continue;
+            }
+
             if tx_commit_check == tx_peers.len() {
+                self.committing = false;
                 return Ok(tx_commit_check);
             }
 
@@ -180,28 +209,20 @@ impl Coordinator {
         }
     }
 
-    fn broadcast_mpt_start(&mut self, mpt: &MultiPeerTransaction) {
-        let mut mpt_peer_ids = mpt.tx_peers.iter().map(|peer| {
-            let id = peer.id.clone();
-            id
-        });
-
-        let mut counter = self.peers.lock().unwrap().len();
+    fn broadcast_mpt_start(&mut self, peer_ids: Vec<String>, command: Command) {
         let mut peers = self.peers.lock().unwrap();
 
-        while counter > 0 {
-            if let Some(peer_id) = mpt_peer_ids.next() {
-                let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
-                peer.stream
-                    .write(
-                        Message::Begin(mpt.tx.command.clone(), mpt.id.clone(), peer_id)
-                            .to_binary()
-                            .unwrap()
-                            .as_slice(),
-                    )
-                    .unwrap();
-            }
-            counter -= 1;
+        for peer_id in peer_ids {
+            let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
+            peer.stream
+                .write(
+                    // FIXME: remove mpt id
+                    Message::Begin(command.clone(), format!("NONE"), peer_id)
+                        .to_binary()
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap();
         }
     }
 }

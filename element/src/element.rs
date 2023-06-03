@@ -112,7 +112,7 @@ async fn handle_channel_messages(
                         .await;
                     }
                     Message::Commit(mpt_id) => {
-                        if !&transaction_possible_id.is_none()
+                        if transaction_possible_id.is_none()
                             || transaction_possible_peer_id.is_none()
                         {
                             break;
@@ -136,10 +136,11 @@ async fn handle_channel_messages(
                             continue;
                         }
 
+                        db_transaction.commit().await.unwrap();
                         let mut stream = stream.lock().await;
                         stream
                             .write(
-                                Message::Done(mpt_id.clone())
+                                Message::Done(peer_id.clone().unwrap())
                                     .to_binary()
                                     .unwrap()
                                     .as_slice(),
