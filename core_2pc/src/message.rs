@@ -4,12 +4,12 @@ use crate::Command;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum Message {
-    Begin((Command, String, String)), // command, mpt id, peer id
-    Accept(String),                   // peer id
-    Reject(String),                   // peer id on coordinator and mpt id on peer
-    Commit(String),                   // mpt id
-    Rollback(String),                 // mpt id
-    Done(String),                     // mpt id
+    Begin(Command, String, String), // command, mpt_id, peer_id
+    Accept(String, String),         // mpt_id, peer_id
+    Reject(String, Option<String>), // mpt_id, peer_id?
+    Commit(String),                 // mpt_id
+    Rollback(String),               // mpt_id
+    Done(String),                   // mpt_id
 }
 
 impl Message {

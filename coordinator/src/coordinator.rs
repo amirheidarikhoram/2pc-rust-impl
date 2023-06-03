@@ -142,7 +142,7 @@ impl Coordinator {
                 let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
                 peer.stream
                     .write(
-                        Message::Begin((mpt.tx.command.clone(), mpt.id.clone(), peer_id))
+                        Message::Begin(mpt.tx.command.clone(), mpt.id.clone(), peer_id)
                             .to_binary()
                             .unwrap()
                             .as_slice(),

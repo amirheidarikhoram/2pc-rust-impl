@@ -68,13 +68,15 @@ async fn handle_channel_messages(
 ) {
     loop {
         let mut peer_transaction: Option<PeerTransaction> = None;
+        let mut peer_id: Option<String> = None;
 
         loop {
             if let Some(message) = rx.recv().await {
                 let transaction_possible_id = peer_transaction.clone().map(|t| t.id.clone());
+                let transaction_possible_peer_id = peer_id.clone();
 
                 match message {
-                    Message::Begin((command, mpt_id)) => {
+                    Message::Begin(command, mpt_id, mpt_peer_id) => {
                         // We don't check if there was any ongoing transaction, we just replace it.
 
                         let pool = pool.lock().await;
@@ -83,13 +85,15 @@ async fn handle_channel_messages(
 
                         let params = convert_args(command.args.iter());
                         if let Err(err) = db_transaction.execute(&command.query, &params).await {
-
                             println!("Begin state: Transaction is invalid: {:?}", command);
                             println!("Error: {:?}", err);
 
                             // send abort message to coordinator because transaction is invalid
-                            update_transaction_state(&stream, Message::Reject(mpt_id.clone()))
-                                .await;
+                            update_transaction_state(
+                                &stream,
+                                Message::Reject(mpt_id.clone(), Some(mpt_peer_id)),
+                            )
+                            .await;
                             continue;
                         }
 
@@ -100,11 +104,17 @@ async fn handle_channel_messages(
                                 command: command.clone(),
                             },
                         });
-
-                        update_transaction_state(&stream, Message::Accept(mpt_id.clone())).await;
+                        peer_id = Some(mpt_peer_id.clone());
+                        update_transaction_state(
+                            &stream,
+                            Message::Accept(mpt_id.clone(), mpt_peer_id),
+                        )
+                        .await;
                     }
                     Message::Commit(mpt_id) => {
-                        if !&transaction_possible_id.is_none() {
+                        if !&transaction_possible_id.is_none()
+                            || transaction_possible_peer_id.is_none()
+                        {
                             break;
                         }
 
@@ -118,8 +128,11 @@ async fn handle_channel_messages(
                         if let Err(_) = db_transaction.execute(&command.query, &params).await {
                             println!("Commit state: Transaction is invalid: {:?}", command);
 
-                            update_transaction_state(&stream, Message::Reject(mpt_id.clone()))
-                                .await;
+                            update_transaction_state(
+                                &stream,
+                                Message::Reject(mpt_id.clone(), transaction_possible_peer_id),
+                            )
+                            .await;
                             continue;
                         }
 
@@ -133,7 +146,7 @@ async fn handle_channel_messages(
                             )
                             .unwrap();
                     }
-                    Message::Reject(_) => {
+                    Message::Reject(..) => {
                         if !peer_transaction.is_none() {
                             peer_transaction = None;
                         }
