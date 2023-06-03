@@ -6,7 +6,7 @@ use actix_web::{
 
 use crate::app_state::AppState;
 
-use core_2pc::{Post, Transaction};
+use core_2pc::{convert_args, Command, Post, Transaction};
 
 #[get("/")]
 async fn get_root() -> impl Responder {
@@ -42,28 +42,26 @@ async fn get_posts(state: Data<AppState>) -> impl Responder {
 async fn create_post(state: Data<AppState>, post: Json<Post>) -> impl Responder {
     let state = state.clone();
 
-    let _coordinator = state.as_ref().coordinator.clone();
+    let coordinator = state.as_ref().coordinator.clone();
 
     let client = state.as_ref().pool.clone().lock().unwrap().clone();
     let mut client = client.get().await.unwrap();
 
     let transaction = client.transaction().await.unwrap();
 
-    /*  TODO: there are 2 ways to send parameters to other nodes:
-            1. send parameters in the command
-            2. serialize the parameters and send them as a separate message
+    let tx = Transaction::new(Command {
+        query: format!("INSERT INTO post (body) VALUES ($1)"),
+        args: vec![post.body.clone()],
+    });
 
-        I use the first method here to avoid any complexity.
-    */
-
-    let tx = Transaction::new(format!("INSERT INTO post (body) VALUES ($1)"));
+    let params = convert_args(tx.command.args.iter());
 
     if let Ok(_) = transaction
-        .execute(tx.command.as_str(), &[&post.body.as_str()])
+        .execute(tx.command.query.as_str(), &params)
         .await
     {
-        // TODO: execute transaction
-        // coordinator.lock().unwrap().execute_transaction(tx).unwrap();
+        coordinator.lock().unwrap().execute_transaction(tx).unwrap();
+        transaction.commit().await.unwrap();
     } else {
         transaction.rollback().await.unwrap();
 

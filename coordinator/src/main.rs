@@ -34,6 +34,7 @@ async fn main() -> std::io::Result<()> {
             }))
             .service(api_handlers::get_root)
             .service(api_handlers::get_posts)
+            .service(api_handlers::create_post)
     })
     .bind(("127.0.0.1", 5000))?
     .run()
