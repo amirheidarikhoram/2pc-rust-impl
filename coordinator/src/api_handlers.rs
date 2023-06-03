@@ -60,8 +60,13 @@ async fn create_post(state: Data<AppState>, post: Json<Post>) -> impl Responder 
         .execute(tx.command.query.as_str(), &params)
         .await
     {
-        coordinator.lock().unwrap().execute_transaction(tx).unwrap();
-        transaction.commit().await.unwrap();
+        match coordinator.lock().unwrap().execute_transaction(tx) {
+            Ok(_) => transaction.commit().await.unwrap(),
+            Err(err) => {
+                transaction.rollback().await.unwrap();
+                return HttpResponse::InternalServerError().body(err);
+            }
+        }
     } else {
         transaction.rollback().await.unwrap();
 
