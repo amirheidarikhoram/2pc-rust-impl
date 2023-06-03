@@ -1,11 +1,10 @@
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
 use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
 
 mod element;
-mod peer_transaction;
 
 #[tokio::main]
 async fn main() {

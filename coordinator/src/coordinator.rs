@@ -5,7 +5,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::{mpsc, Arc, Mutex},
-    thread::{spawn, JoinHandle},
+    thread::spawn,
     time::Duration,
 };
 
@@ -20,8 +20,7 @@ type ArcOpMPT = Arc<Mutex<MultiPeerTransaction>>;
 
 pub struct Coordinator {
     listener: TcpListener,
-    messages: Vec<Message>,
-    jh: JoinHandle<()>,
+    // TODO: change vec to hashmap
     peers: Arc<Mutex<Vec<Peer>>>,
     mp_transaction: ArcOpMPT,
     committing: bool,
@@ -49,7 +48,7 @@ impl Coordinator {
         }));
         let mp_transactions_clone = Arc::clone(&mp_transactions);
 
-        let jh = spawn(move || {
+        spawn(move || {
             let (tx, rx) = mpsc::channel::<Message>();
 
             spawn(move || handle_listener(listener, tx, peers_clone));
@@ -64,8 +63,6 @@ impl Coordinator {
 
         Self {
             listener: self_listener,
-            messages: Vec::new(),
-            jh,
             peers,
             mp_transaction: mp_transactions,
             committing: false,
@@ -78,7 +75,7 @@ impl Coordinator {
         println!("Received: {:?}", message);
 
         match message {
-            Message::Accept(_, peer_id) => {
+            Message::Accept(peer_id) => {
                 let mpts = mp_transactions.lock().unwrap();
 
                 let peer = mpts.tx_peers.iter().find(|p| p.id == peer_id);
@@ -87,7 +84,7 @@ impl Coordinator {
                     peer.update_state(TransactionState::Accept)
                 }
             }
-            Message::Reject(_, peer_id) => {
+            Message::Reject(peer_id) => {
                 let mpts = mp_transactions.lock().unwrap();
 
                 if let Some(peer_id) = peer_id {
@@ -167,8 +164,7 @@ impl Coordinator {
                         tx_commit_check += 1;
                     }
                     TransactionState::Reject => {
-                        // FIXME: this is a temp fix, mpt id in reject should be deleted
-                        self.broadcast_mpt(peer_ids, Message::Reject(format!("NONE"), None));
+                        self.broadcast_mpt(peer_ids, Message::Reject(None));
 
                         return Err(format!("One of peers rejected the transaction"));
                     }
@@ -181,7 +177,7 @@ impl Coordinator {
 
             if tx_accept_check == tx_peers.len() {
                 if !self.committing {
-                    self.broadcast_mpt(peer_ids, Message::Commit(format!("NONE")));
+                    self.broadcast_mpt(peer_ids, Message::Commit());
                 }
 
                 self.committing = true;
@@ -197,11 +193,11 @@ impl Coordinator {
         }
     }
 
-    // FIXME: remove mpt from args
     fn broadcast_mpt(&mut self, peer_ids: Vec<String>, message: Message) {
         let mut peers = self.peers.lock().unwrap();
 
         for peer_id in peer_ids {
+            // FIXME: we know that for every peer_id there is a peer in the peers vector
             let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
             peer.stream
                 .write(message.to_binary().unwrap().as_slice())
@@ -213,11 +209,11 @@ impl Coordinator {
         let mut peers = self.peers.lock().unwrap();
 
         for peer_id in peer_ids {
+            // FIXME: we know that for every peer_id there is a peer in the peers vector
             let peer = peers.iter_mut().find(|peer| peer.id == peer_id).unwrap();
             peer.stream
                 .write(
-                    // FIXME: remove mpt id
-                    Message::Begin(command.clone(), format!("NONE"), peer_id)
+                    Message::Begin(command.clone(), peer_id)
                         .to_binary()
                         .unwrap()
                         .as_slice(),
