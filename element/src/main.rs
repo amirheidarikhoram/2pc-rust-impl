@@ -16,7 +16,7 @@ async fn main() {
     }
 
     let mut cfg = Config::new();
-    cfg.user = Some("amir".to_string());
+    cfg.user = Some("root".to_string());
     cfg.dbname = Some(args[1].clone());
     cfg.host = Some("localhost".to_string());
     cfg.manager = Some(ManagerConfig {

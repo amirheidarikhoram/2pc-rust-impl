@@ -14,7 +14,7 @@ mod transaction;
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut cfg = Config::new();
-    cfg.user = Some("amir".to_string());
+    cfg.user = Some("root".to_string());
     cfg.dbname = Some("2pc".to_string());
     cfg.host = Some("localhost".to_string());
     cfg.manager = Some(ManagerConfig {
