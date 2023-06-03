@@ -1,25 +1,30 @@
 use std::{
-    io::Read,
+    io::{Read, Write},
     net::TcpStream,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration,
 };
 
-use core_2pc::Message;
+use core_2pc::{convert_args, Message, Transaction, TransactionState};
 use deadpool_postgres::Pool;
-use tokio::{sync::mpsc, task::spawn};
+use tokio::{
+    sync::{mpsc, Mutex},
+    task::spawn,
+};
+
+use crate::peer_transaction::PeerTransaction;
 
 pub struct Element {
     pub stream: Arc<Mutex<TcpStream>>,
 }
 
 impl Element {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let stream = Arc::new(Mutex::new(TcpStream::connect("127.0.0.1:8080").unwrap()));
 
         stream
             .lock()
-            .unwrap()
+            .await
             .set_read_timeout(Some(Duration::new(0, 1)))
             .expect("Couldn't set read timeout on stream");
 
@@ -27,23 +32,30 @@ impl Element {
     }
 
     pub async fn run(self, pool: Arc<Mutex<Pool>>) {
+        let pool = Arc::clone(&pool);
+
         const FRAME_SIZE: usize = 1024;
 
         let (tx, rx) = mpsc::channel::<Message>(1);
 
         let handler_stream = Arc::clone(&self.stream);
-        spawn(async move { move || handle_channel_messages(rx, handler_stream, pool) });
+
+        spawn(async move { handle_channel_messages(rx, handler_stream, pool).await });
 
         let stream = self.stream.clone();
         loop {
             let mut buf = [0; FRAME_SIZE];
 
-            let mut stream = stream.lock().unwrap();
-            stream.read(&mut buf).unwrap();
-            if let Ok(message) = Message::from_binary(buf.as_slice()) {
-                tx.send(message).await.unwrap();
-            } else {
-                eprintln!("error: failed to deserialize message")
+            let mut stream = stream.lock().await;
+
+            if let Ok(_) = stream.read(&mut buf) {
+                if let Ok(message) = Message::from_binary(buf.as_slice()) {
+                    println!("Received message: {:?}", message);
+
+                    tx.send(message).await.unwrap();
+                } else {
+                    eprintln!("error: failed to deserialize message")
+                }
             }
         }
     }
@@ -54,5 +66,94 @@ async fn handle_channel_messages(
     stream: Arc<Mutex<TcpStream>>,
     pool: Arc<Mutex<Pool>>,
 ) {
-    todo!()
+    loop {
+        let mut peer_transaction: Option<PeerTransaction> = None;
+
+        loop {
+            if let Some(message) = rx.recv().await {
+                let transaction_possible_id = peer_transaction.clone().map(|t| t.id.clone());
+
+                match message {
+                    Message::Begin((command, mpt_id)) => {
+                        // We don't check if there was any ongoing transaction, we just replace it.
+
+                        let pool = pool.lock().await;
+                        let mut client = pool.get().await.unwrap();
+                        let db_transaction = client.transaction().await.unwrap();
+
+                        let params = convert_args(command.args.iter());
+                        if let Err(err) = db_transaction.execute(&command.query, &params).await {
+
+                            println!("Begin state: Transaction is invalid: {:?}", command);
+                            println!("Error: {:?}", err);
+
+                            // send abort message to coordinator because transaction is invalid
+                            update_transaction_state(&stream, Message::Reject(mpt_id.clone()))
+                                .await;
+                            continue;
+                        }
+
+                        peer_transaction = Some(PeerTransaction {
+                            id: mpt_id.clone(),
+                            transaction: Transaction {
+                                state: TransactionState::Accept,
+                                command: command.clone(),
+                            },
+                        });
+
+                        update_transaction_state(&stream, Message::Accept(mpt_id.clone())).await;
+                    }
+                    Message::Commit(mpt_id) => {
+                        if !&transaction_possible_id.is_none() {
+                            break;
+                        }
+
+                        let pool = pool.lock().await;
+                        let mut client = pool.get().await.unwrap();
+                        let db_transaction = client.transaction().await.unwrap();
+
+                        let command = peer_transaction.clone().unwrap().transaction.command;
+
+                        let params = convert_args(command.args.iter());
+                        if let Err(_) = db_transaction.execute(&command.query, &params).await {
+                            println!("Commit state: Transaction is invalid: {:?}", command);
+
+                            update_transaction_state(&stream, Message::Reject(mpt_id.clone()))
+                                .await;
+                            continue;
+                        }
+
+                        let mut stream = stream.lock().await;
+                        stream
+                            .write(
+                                Message::Done(mpt_id.clone())
+                                    .to_binary()
+                                    .unwrap()
+                                    .as_slice(),
+                            )
+                            .unwrap();
+                    }
+                    Message::Reject(_) => {
+                        if !peer_transaction.is_none() {
+                            peer_transaction = None;
+                        }
+                    }
+                    Message::Done(_) => {
+                        if !peer_transaction.is_none() {
+                            peer_transaction = None;
+                        }
+                    }
+                    _ => {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn update_transaction_state(stream: &Arc<Mutex<TcpStream>>, state: Message) {
+    let mut stream = stream.lock().await;
+
+    stream.write(state.to_binary().unwrap().as_slice()).unwrap();
 }
