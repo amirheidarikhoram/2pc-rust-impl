@@ -34,18 +34,16 @@ impl Coordinator {
         let peers = Arc::new(Mutex::new(Vec::new()));
         let peers_clone = Arc::clone(&peers);
 
-        let mp_transactions: ArcOpMPT = Arc::new(Mutex::new(MultiPeerTransaction {
-            id: format!("NONE"),
-            tx_peers: vec![],
-            state: TransactionState::Reject,
-            tx: Transaction {
+        let mp_transactions: ArcOpMPT = Arc::new(Mutex::new(MultiPeerTransaction::new(
+            vec![],
+            Transaction {
                 command: Command {
                     query: format!("NONE"),
                     args: vec![],
                 },
                 state: TransactionState::Reject,
             },
-        }));
+        )));
         let mp_transactions_clone = Arc::clone(&mp_transactions);
 
         spawn(move || {
