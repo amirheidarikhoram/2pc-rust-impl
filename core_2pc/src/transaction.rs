@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::Command;
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum TransactionState {
     Begin,
@@ -12,11 +14,11 @@ pub enum TransactionState {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Transaction {
     pub state: TransactionState,
-    pub command: String,
+    pub command: Command,
 }
 
 impl Transaction {
-    pub fn new(command: String) -> Self {
+    pub fn new(command: Command) -> Self {
         Self {
             state: TransactionState::Begin,
             command,

@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::Command;
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum Message {
-    Begin((String, String)),
+    Begin((Command, String)),
     Accept(String),
     Reject(String),
     Commit(String),
